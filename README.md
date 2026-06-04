@@ -1,7 +1,5 @@
 # KAN-Flow: Discrete Flow Matching with Kolmogorov–Arnold Networks for Target-Conditioned Peptide Sequence Design
 
-<div align="center">
-
 [![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-EE4C2C?style=flat-square&logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![ESM-2](https://img.shields.io/badge/ESM--2-650M-00A67E?style=flat-square)](https://github.com/facebookresearch/esm)
@@ -11,10 +9,8 @@
 
 **A generative framework for designing peptide sequences conditioned on target protein structure, combining discrete flow matching with KAN-based convolutional networks.**
 
-![modelnew](C:\Users\kyx\Desktop\modelnew.png)
-
 ---
-
+![model](./modelnew.png)
 ## Overview
 
 KAN-Flow is a target-conditioned peptide sequence generation model that unifies two powerful paradigms:
@@ -186,6 +182,7 @@ NOISE_TYPE     = 'mask'   # 'mask' or 'uniform'
 ```
 
 **Loss function:**
+
 ```
 L_total = L_FlowKL + λ · L_CE
 ```
@@ -210,13 +207,14 @@ Edit the configuration block in `main()`:
 
 ```python
 CHECKPOINT_PATH = "./ckpt/best_loss_model.ckpt"  # or use hf_hub_download() above
-TARGET_SEQUENCE = "MKTAYIAKQRQISFVK..."   # Your target protein sequence
-PEPTIDE_LENGTH  = 15                       # Desired peptide length
-N_SAMPLES       = 5                        # Number of sequences to generate
-STEPS           = 150                      # Flow matching solver steps
+TARGET_SEQUENCE = "MKTAYIAKQRQISFVK..."           # Your target protein sequence
+PEPTIDE_LENGTH  = 15                               # Desired peptide length
+N_SAMPLES       = 5                                # Number of sequences to generate
+STEPS           = 150                              # Flow matching solver steps
 ```
 
 **Example output:**
+
 ```
 Generated 5 peptides (length=15):
 --------------------------------------------------
@@ -231,8 +229,6 @@ Length constraints are enforced via hard logit masking during the flow matching 
 - Position L−1 → `[EOS]`
 - Positions 1…L−2 → amino acids only (no special tokens)
 - Positions ≥ L → `[PAD]`
-
----
 
 ---
 
