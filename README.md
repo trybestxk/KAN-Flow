@@ -1,4 +1,4 @@
-# KAN-Flow: Discrete Flow Matching with Kolmogorov–Arnold Networks for Target-Conditioned Peptide Sequence Design
+# KAN-Flow: Discrete Flow Matching with Kolmogorov–Arnold Networks for Target-Conditioned Therapeutic Peptide Design
 
 [![Python](https://img.shields.io/badge/Python-3.8%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-EE4C2C?style=flat-square&logo=pytorch&logoColor=white)](https://pytorch.org/)
@@ -7,29 +7,35 @@
 [![Dataset](https://img.shields.io/badge/🤗%20Dataset-Trybestxk%2FKAN--Flow-FFD21E?style=flat-square)](https://huggingface.co/datasets/Trybestxk/KAN-Flow)
 [![Model](https://img.shields.io/badge/🤗%20Model-Trybestxk%2FKAN--Flow-FFD21E?style=flat-square)](https://huggingface.co/Trybestxk/KAN-Flow)
 
-**A generative framework for designing peptide sequences conditioned on target protein structure, combining discrete flow matching with KAN-based convolutional networks.**
+**A sequence-only generative framework for designing target-specific peptide binders from protein sequences, combining discrete flow matching with RBF-KAN-enhanced dilated convolutional networks.**
 
 ---
+
 ![model](./modelnew.png)
+
 ## Overview
 
-KAN-Flow is a target-conditioned peptide sequence generation model that unifies two powerful paradigms:
+KAN-Flow is a sequence-only, target-conditioned peptide generation framework that integrates two complementary modeling paradigms:
 
-- **Discrete Flow Matching** — a continuous-time generative framework operating over discrete token spaces, enabling principled and efficient sequence generation via probability path interpolation.
-- **Kolmogorov–Arnold Networks (KAN)** — replacing standard MLPs in the denoising backbone with learnable spline-based activations, providing expressive, data-adaptive feature transformations at each convolutional layer.
+- **Discrete Flow Matching** — a continuous-time generative framework over discrete amino-acid token spaces. KAN-Flow learns a target-conditioned probability path from an all-mask prior toward the peptide data distribution, enabling progressive peptide generation directly in sequence space.
+- **RBF-based Kolmogorov–Arnold Networks (RBF-KAN)** — adaptive nonlinear transformations embedded within dilated convolutional blocks. Learnable radial basis functions replace fixed-form nonlinear mappings and enable the model to capture position-sensitive and multi-scale residue interactions.
 
-The model is conditioned on target protein representations extracted from **ESM-2 (650M)** via bidirectional cross-attention, enabling the generation of peptide binders tailored to a specific protein target.
+Target protein sequences are encoded using a frozen **ESM-2 (650M)** model. Bidirectional cross-attention is then used to model fine-grained dependencies between target residues and partially generated peptide positions.
+
+Importantly, KAN-Flow requires **only the target protein sequence** during generation and does not require experimentally resolved or predicted three-dimensional target structures.
 
 ---
 
 ## Key Features
 
-- **Mixture Discrete Flow Matching** with polynomial convex scheduling for stable discrete sequence generation
-- **FastKAN Conv1D layers** with radial basis function activations and learnable grid parameters as the denoising backbone
-- **Bidirectional cross-attention** between peptide tokens and ESM-2 target embeddings across multiple layers
-- **Hard length constraints** enforced via logit masking during both training and inference — guaranteeing exact sequence lengths without post-hoc filtering
-- **Combined loss** of flow matching KL divergence and cross-entropy for improved token-level accuracy
-- **Early stopping** and learning rate scheduling for robust training
+- **Target-conditioned discrete flow matching** with a quadratic probability-path scheduler for progressive amino-acid sequence generation
+- **RBF-KAN dilated convolutional blocks** with learnable radial basis transformations for adaptive local and multi-scale residue modeling
+- **Bidirectional cross-attention** between peptide representations and ESM-2 target residue embeddings
+- **Sequence-only target conditioning** without requiring three-dimensional target structures or predefined binding-site information
+- **Hard sequence-length constraints** enforced during generation to preserve valid peptide lengths
+- **Combined training objective** using discrete flow-matching KL divergence and token-level cross-entropy
+- **Parallel Euler sampling** for efficient discrete sequence generation
+- **Early stopping and learning-rate scheduling** for robust model training
 
 ---
 
@@ -39,18 +45,18 @@ The model is conditioned on target protein representations extracted from **ESM-
 
 | Module | Description |
 |---|---|
-| `ConditionalCNNModel` | Main denoising network; takes noisy tokens + time + target embeddings |
-| `FastKANConv1DLayer` | KAN-based 1D convolution with RBF basis and spline weights |
-| `CrossAttentionBlock` | Bidirectional cross-attention between binder and target representations |
-| `TargetEmbeddingEncoder` | Projects ESM-2 embeddings into model hidden space |
-| `GaussianFourierProjection` | Continuous time embedding via random Fourier features |
-| `ConditionalConstrainedWrapper` | Wraps model for inference with hard length constraint enforcement |
+| `ConditionalCNNModel` | Main conditional denoising network that processes partially masked peptide tokens, flow time, and target representations |
+| `FastKANConv1DLayer` | RBF-KAN-enhanced 1D convolutional layer with learnable radial basis transformations |
+| `CrossAttentionBlock` | Bidirectional cross-attention module for fine-grained target–peptide interaction modeling |
+| `TargetEmbeddingEncoder` | Projects frozen ESM-2 target residue representations into the model hidden space |
+| `GaussianFourierProjection` | Encodes continuous flow time using Gaussian random Fourier features |
+| `ConditionalConstrainedWrapper` | Applies sequence constraints during inference and controls valid peptide-token generation |
 
-### KAN Backbone (Dilated Multi-Scale)
+### RBF-KAN Backbone
 
-Six `FastKANConv1DLayer` blocks with increasing dilation rates capture both local and long-range sequence dependencies:
+The conditional denoising backbone contains six dilated `FastKANConv1DLayer` blocks with progressively enlarged receptive fields to capture both local and long-range residue dependencies:
 
-```
+```text
 Block 1: kernel=3, dilation=1  (local)
 Block 2: kernel=3, dilation=2
 Block 3: kernel=3, dilation=4
@@ -59,27 +65,59 @@ Block 5: kernel=3, dilation=8
 Block 6: kernel=3, dilation=9  (long-range)
 ```
 
-Each block is conditioned on both the time embedding and a global target embedding via additive feature modulation.
+Each RBF-KAN block receives both a continuous **flow-time embedding** and a global **target protein representation** through additive feature modulation.
+
+The RBF-KAN transformation combines an RBF-expanded adaptive branch with a conventional nonlinear base branch, allowing the network to learn flexible residue-dependent transformations while maintaining stable optimization.
+
+### Target–Peptide Conditioning
+
+KAN-Flow uses bidirectional cross-attention to model dependencies between the target protein and the evolving peptide sequence.
+
+At each cross-attention stage:
+
+1. peptide residues attend to target residues;
+2. target representations are updated according to the current peptide state;
+3. the resulting representations are propagated into subsequent conditional generation blocks.
+
+This allows the target representation to adapt dynamically to the partially generated peptide sequence throughout the generation process.
+
+---
+
+## Discrete Flow Matching
+
+KAN-Flow formulates peptide generation as a continuous-time Markov process that transports an all-mask prior toward the target-conditioned peptide distribution.
+
+Generation follows a quadratic probability path:
+
+```text
+κ(t) = t²
+```
+
+which progressively increases the effective transition rate as the process approaches the peptide data distribution.
+
+Rather than repeatedly applying stochastic denoising under a predefined corruption schedule, the model directly learns the transition dynamics associated with the desired probability path.
+
+During inference, the continuous-time process is discretized using a first-order Euler solver, and all peptide positions are updated in parallel.
 
 ---
 
 ## Project Structure
 
-```
+```text
 KAN-Flow/
-├── model.py              # Model architecture (KAN-CNN, cross-attention, wrappers)
-├── train.py              # Training loop with flow matching loss + CE loss
-├── inference_demo.py     # Inference script for peptide generation
-├── loder.py              # Dataset loading utilities
-├── utils.py              # Helpers: noise, masking, metrics (AAR, perplexity)
+├── model.py
+├── train.py
+├── inference_demo.py
+├── loder.py
+├── utils.py
 ├── process/
-│   ├── alphabet_config.pkl        # ESM-2 vocabulary/token index configuration
-│   ├── esm_embedding_weights.pt   # Cached ESM-2 embedding matrix
+│   ├── alphabet_config.pkl
+│   ├── esm_embedding_weights.pt
 │   ├── train_dataset.csv
 │   ├── val_dataset.csv
 │   └── test_dataset.csv
 └── ckpt/
-    └── best_loss_model.ckpt       # Best checkpoint (saved by validation loss)
+    └── best_loss_model.ckpt
 ```
 
 ---
@@ -95,18 +133,20 @@ pip install fair-esm
 pip install flow-matching
 ```
 
-> **Note:** ESM-2 (650M) weights will be downloaded automatically on first use via `esm.pretrained.esm2_t33_650M_UR50D()`.
+> **Note:** ESM-2 (650M) weights will be downloaded automatically on first use via:
+
+```python
+esm.pretrained.esm2_t33_650M_UR50D()
+```
 
 ---
 
 ## 🤗 Hugging Face Resources
 
-We release both the pretrained model weights and the full dataset on Hugging Face for reproducibility and community use.
-
 | Resource | Link | Description |
 |---|---|---|
-| 📦 **Dataset** | [Trybestxk/KAN-Flow](https://huggingface.co/datasets/Trybestxk/KAN-Flow) | Train / val / test splits of peptide–target pairs |
-| 🧠 **Model Weights** | [Trybestxk/KAN-Flow](https://huggingface.co/Trybestxk/KAN-Flow) | Best checkpoint (`best_loss_model.ckpt`) |
+| 📦 **Dataset** | [Trybestxk/KAN-Flow](https://huggingface.co/datasets/Trybestxk/KAN-Flow) | Training, validation, and test peptide–target pairs |
+| 🧠 **Model Weights** | [Trybestxk/KAN-Flow](https://huggingface.co/Trybestxk/KAN-Flow) | Pretrained KAN-Flow checkpoint |
 
 ### Download Model Weights
 
@@ -120,44 +160,24 @@ ckpt_path = hf_hub_download(
 )
 ```
 
-Or via the Hugging Face CLI:
-
-```bash
-pip install huggingface_hub
-huggingface-cli download Trybestxk/KAN-Flow best_loss_model.ckpt --local-dir ./ckpt
-```
-
 ### Download Dataset
 
 ```python
 from datasets import load_dataset
 
 dataset = load_dataset("Trybestxk/KAN-Flow")
-# dataset["train"], dataset["validation"], dataset["test"]
-```
-
-Or download the raw CSV files directly:
-
-```bash
-huggingface-cli download Trybestxk/KAN-Flow --repo-type dataset --local-dir ./process
 ```
 
 ---
 
 ## Data Preparation
 
-The processed dataset is available directly from Hugging Face (see above). If you wish to preprocess from scratch, place your data under `./process/` in the following format:
-
-**CSV files** (`train_dataset.csv`, `val_dataset.csv`, `test_dataset.csv`):
+Each sample consists of a target protein sequence and its corresponding peptide binder sequence.
 
 | Column | Description |
 |---|---|
-| `binder_sequence` | Peptide amino acid sequence |
-| `target_sequence` | Target protein amino acid sequence |
-
-Run your preprocessing script to generate:
-- `alphabet_config.pkl` — vocabulary configuration (token indices for CLS, EOS, PAD, mask, amino acids)
-- `esm_embedding_weights.pt` — cached ESM-2 embedding matrix
+| `binder_sequence` | Peptide binder amino-acid sequence |
+| `target_sequence` | Target protein amino-acid sequence |
 
 ---
 
@@ -167,33 +187,27 @@ Run your preprocessing script to generate:
 python train.py
 ```
 
-Key hyperparameters (configured at the top of `train.py`):
+### Main Hyperparameters
 
 ```python
-lr             = 1e-4
-epochs         = 100
-batch_size     = 64
-embed_dim      = 512
-hidden_dim     = 512
+lr                = 1e-4
+epochs            = 100
+batch_size        = 64
+embed_dim         = 512
+hidden_dim        = 512
 cross_attn_layers = 3
 cross_attn_heads  = 8
-ce_weight      = 1.0      # weight for cross-entropy loss term
-NOISE_TYPE     = 'mask'   # 'mask' or 'uniform'
+ce_weight         = 1.0
+NOISE_TYPE        = "mask"
 ```
 
-**Loss function:**
+### Training Objective
 
+```text
+L_total = L_DFM + λCE · L_CE
 ```
-L_total = L_FlowKL + λ · L_CE
-```
 
-Training uses `ReduceLROnPlateau` scheduling (factor=0.7, patience=5) and early stopping (patience=10). The best checkpoint by validation loss is saved to `./ckpt/best_loss_model.ckpt`.
-
-**Training metrics logged per epoch:**
-- Total loss, Flow KL loss, CE loss
-- Amino Acid Recovery (AAR)
-- Perplexity
-- Sequence constraint violation count
+where `L_DFM` is the discrete flow-matching objective and `L_CE` is the auxiliary token-level cross-entropy objective.
 
 ---
 
@@ -203,32 +217,62 @@ Training uses `ReduceLROnPlateau` scheduling (factor=0.7, patience=5) and early 
 python inference_demo.py
 ```
 
-Edit the configuration block in `main()`:
-
 ```python
-CHECKPOINT_PATH = "./ckpt/best_loss_model.ckpt"  # or use hf_hub_download() above
-TARGET_SEQUENCE = "MKTAYIAKQRQISFVK..."           # Your target protein sequence
-PEPTIDE_LENGTH  = 15                               # Desired peptide length
-N_SAMPLES       = 5                                # Number of sequences to generate
-STEPS           = 150                              # Flow matching solver steps
+CHECKPOINT_PATH = "./ckpt/best_loss_model.ckpt"
+TARGET_SEQUENCE = "MKTAYIAKQRQISFVK..."
+PEPTIDE_LENGTH  = 15
+N_SAMPLES       = 5
+STEPS           = 150
 ```
 
-**Example output:**
+Only the **target protein sequence** is required as biological conditioning information. No three-dimensional target structure is required.
 
-```
-Generated 5 peptides (length=15):
---------------------------------------------------
- 1. ACDEFGHIKLMNPQR (len=15)
- 2. WNDTLKRHQAICSFV (len=15)
- ...
---------------------------------------------------
+---
+
+## Sequence Constraints
+
+```text
+Position 0       → [CLS]
+Position L − 1   → [EOS]
+Positions 1…L−2  → amino-acid tokens only
+Positions ≥ L    → [PAD]
 ```
 
-Length constraints are enforced via hard logit masking during the flow matching solver, guaranteeing:
-- Position 0 → `[CLS]`
-- Position L−1 → `[EOS]`
-- Positions 1…L−2 → amino acids only (no special tokens)
-- Positions ≥ L → `[PAD]`
+---
+
+## Reported Performance
+
+KAN-Flow was evaluated on **15,164 peptide–protein complexes** and achieved:
+
+- **FPD:** 0.451
+- **MMD:** 0.005
+- **Reference-space coverage:** 98.29%
+- **Cα-RMSD:** 2.911 Å
+- **Minimum predicted docking score:** −19.598 kcal/mol
+- **86.3%** of generated peptides achieved a more favorable minimum docking score than their corresponding reference binders
+
+---
+
+## Ablation Analysis
+
+Controlled ablation experiments evaluate three major components:
+
+1. **Quadratic probability path**
+2. **RBF-KAN convolutional backbone**
+3. **Bidirectional target–peptide cross-attention**
+
+Together, these components contribute complementary improvements in sequence-distribution fidelity, structural quality, and predicted docking performance.
+
+---
+
+## Applications
+
+KAN-Flow has been evaluated in two representative therapeutic scenarios:
+
+- **MHC-I epitope generation**
+- **GLP-1 receptor agonist optimization**
+
+These studies demonstrate the potential of KAN-Flow for therapeutic peptide design without requiring three-dimensional target structures.
 
 ---
 
@@ -240,6 +284,22 @@ This project is licensed under the MIT License. See [LICENSE](LICENSE) for detai
 
 ## Acknowledgements
 
-- [ESM-2](https://github.com/facebookresearch/esm) by Meta AI Research for protein sequence representations
-- [flow-matching](https://github.com/facebookresearch/flow_matching) library for discrete flow matching primitives
-- [FastKAN](https://github.com/ZiyaoLi/fast-kan) for efficient KAN implementations
+- [ESM-2](https://github.com/facebookresearch/esm) by Meta AI Research for protein sequence representation
+- [flow-matching](https://github.com/facebookresearch/flow_matching) for discrete flow-matching utilities
+- [FastKAN](https://github.com/ZiyaoLi/fast-kan) for efficient RBF-based KAN implementations
+
+---
+
+## Citation
+
+If you find KAN-Flow useful in your research, please cite our work:
+
+```bibtex
+@article{kanflow2026,
+  title   = {KAN-Flow: Discrete Flow Matching with Kolmogorov--Arnold Networks for Target-Conditioned Therapeutic Peptide Design},
+  author  = {Wang, Guishen and Kong, Yuxiang and Fu, Yuyouqiang and others},
+  year    = {2026}
+}
+```
+
+> Citation information will be updated after publication.
